@@ -3,13 +3,14 @@ import Fastify, { type FastifyError, type FastifyInstance } from "fastify";
 import { config, missingEnableBankingConfig } from "./config.js";
 import { EnableBankingError } from "./enablebanking/client.js";
 import { HttpError } from "./lib/errors.js";
+import { AUTH_CALLBACK_PATH, HEALTH_PATH } from "./lib/paths.js";
 import { accountRoutes } from "./routes/accounts.js";
 import { authRoutes } from "./routes/auth.js";
 import { transactionRoutes } from "./routes/transactions.js";
 import { getStoredSession } from "./session-store.js";
 
 const MAX_BODY_BYTES = 1024 * 1024;
-const HEALTH_PATH = "/health";
+const PUBLIC_PATHS = new Set<string>([HEALTH_PATH, AUTH_CALLBACK_PATH]);
 
 /**
  * Compares two strings without leaking their contents through timing.
@@ -37,8 +38,9 @@ function registerApiKeyHook(app: FastifyInstance): void {
 
     //else
 
+    // The browser cannot send the service key, so public paths stay open.
     const path = request.url.split("?")[0] ?? "";
-    if (path === HEALTH_PATH) return;
+    if (PUBLIC_PATHS.has(path)) return;
 
     //else
 

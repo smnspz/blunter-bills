@@ -82,8 +82,10 @@ export const config = {
     port,
     host: optionalEnv("HOST") ?? "0.0.0.0",
     logLevel: optionalEnv("LOG_LEVEL") ?? "info",
-    /** Optional bearer token required on every route except /health. */
+    /** Optional bearer token required on every route except public paths. */
     apiKey: optionalEnv("SERVICE_API_KEY"),
+    /** Public origin of the web app, used to validate return_url. */
+    frontendUrl: optionalEnv("FRONTEND_URL") ?? "http://localhost:5173",
   },
   dataDir: resolve(optionalEnv("DATA_DIR") ?? ".data"),
   enableBanking: {

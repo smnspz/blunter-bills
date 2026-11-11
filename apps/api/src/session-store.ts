@@ -28,9 +28,11 @@ export interface StoredSession {
   authorizedAt: string;
 }
 
-interface PendingState {
+/** Pending authorization state awaiting the bank redirect. */
+export interface PendingState {
   state: string;
   createdAt: string;
+  returnUrl: string | null;
 }
 
 interface StoreData {
@@ -92,6 +94,12 @@ async function load(): Promise<StoreData> {
   } catch {
     throw new Error(`Could not parse ${storeFile}. Fix or delete it before starting the service.`);
   }
+
+  // Normalize stores written before return URLs were tracked
+  cache.pendingStates = cache.pendingStates.map((pending) => ({
+    ...pending,
+    returnUrl: pending.returnUrl ?? null,
+  }));
 
   prunePendingStates(cache);
   return cache;
@@ -161,12 +169,13 @@ export async function clearSession(): Promise<void> {
  * Records an authorization state issued by this service.
  *
  * @param state - Opaque state value sent to Enable Banking.
+ * @param returnUrl - Frontend URL to redirect to after the bank callback, or null.
  * @returns Nothing. Writes the store.
  */
-export async function addPendingState(state: string): Promise<void> {
+export async function addPendingState(state: string, returnUrl: string | null): Promise<void> {
   const store = await load();
   prunePendingStates(store);
-  store.pendingStates.push({ state, createdAt: new Date().toISOString() });
+  store.pendingStates.push({ state, createdAt: new Date().toISOString(), returnUrl });
   await persist(store);
 }
 
@@ -174,18 +183,18 @@ export async function addPendingState(state: string): Promise<void> {
  * Consumes an authorization state if it was issued by this service and is still valid.
  *
  * @param state - State value returned by Enable Banking.
- * @returns True when the state was valid, false otherwise.
+ * @returns The consumed pending state, or null when the state is unknown or expired.
  */
-export async function consumePendingState(state: string): Promise<boolean> {
+export async function consumePendingState(state: string): Promise<PendingState | null> {
   const store = await load();
   prunePendingStates(store);
 
   const index = store.pendingStates.findIndex((pending) => pending.state === state);
-  if (index === -1) return false;
+  if (index === -1) return null;
 
   //else
 
-  store.pendingStates.splice(index, 1);
+  const [pending] = store.pendingStates.splice(index, 1);
   await persist(store);
-  return true;
+  return pending ?? null;
 }

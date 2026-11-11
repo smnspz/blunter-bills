@@ -24,6 +24,7 @@ process.env.ENABLE_BANKING_BASE_URL = mock.url;
 process.env.ENABLE_BANKING_REDIRECT_URL = "http://localhost/auth/callback";
 process.env.ENABLE_BANKING_ASPSP_NAME = "Mock ASPSP";
 process.env.ENABLE_BANKING_ASPSP_COUNTRY = "FI";
+process.env.FRONTEND_URL = "http://localhost:5173";
 
 const { buildApp } = await import("../src/app.js");
 const app = buildApp();
@@ -99,6 +100,16 @@ describe("Enable Banking service integration", () => {
     assert.equal(response.json<{ error: string }>().error, "unauthorized");
   });
 
+  it("rejects a return_url outside the frontend origin", async () => {
+    const response = await call({
+      method: "POST",
+      url: "/auth",
+      body: { return_url: "https://evil.example/callback" },
+    });
+    assert.equal(response.statusCode, 400);
+    assert.equal(response.json<{ error: string }>().error, "invalid_return_url");
+  });
+
   it("returns 404 when no session exists", async () => {
     const response = await call({ method: "GET", url: "/transactions" });
     assert.equal(response.statusCode, 404);
@@ -131,10 +142,11 @@ describe("Enable Banking service integration", () => {
     pendingState = body.state;
   });
 
-  it("reports a denied authorization", async () => {
+  it("allows the browser callback without the service key", async () => {
     const response = await call({
       method: "GET",
       url: "/auth/callback?error=access_denied&error_description=Denied+by+user",
+      authenticated: false,
     });
     assert.equal(response.statusCode, 400);
     assert.equal(response.json<{ error: string }>().error, "authorization_failed");
@@ -282,5 +294,44 @@ describe("Enable Banking service integration", () => {
     const afterDeletion = await call({ method: "GET", url: "/transactions" });
     assert.equal(afterDeletion.statusCode, 404);
     assert.equal(afterDeletion.json<{ error: string }>().error, "no_session");
+  });
+
+  it("redirects denied authorizations back to the frontend", async () => {
+    const start = await call({
+      method: "POST",
+      url: "/auth",
+      body: { return_url: "http://localhost:5173/auth/callback" },
+    });
+    const { state } = start.json<{ state: string }>();
+
+    const callback = await call({
+      method: "GET",
+      url: `/auth/callback?error=access_denied&error_description=Denied&state=${state}`,
+      authenticated: false,
+    });
+
+    assert.equal(callback.statusCode, 302);
+    assert.equal(
+      callback.headers.location,
+      "http://localhost:5173/auth/callback?auth=error&message=Denied",
+    );
+  });
+
+  it("redirects successful authorizations back to the frontend", async () => {
+    const start = await call({
+      method: "POST",
+      url: "/auth",
+      body: { return_url: "http://localhost:5173/auth/callback" },
+    });
+    const { state } = start.json<{ state: string }>();
+
+    const callback = await call({
+      method: "GET",
+      url: `/auth/callback?code=good-code&state=${state}`,
+      authenticated: false,
+    });
+
+    assert.equal(callback.statusCode, 302);
+    assert.equal(callback.headers.location, "http://localhost:5173/auth/callback?auth=success");
   });
 });

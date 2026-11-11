@@ -12,6 +12,7 @@ import {
 import { EnableBankingError } from "../enablebanking/client.js";
 import type { Aspsp, PsuType, SessionAccount } from "../enablebanking/types.js";
 import { HttpError } from "../lib/errors.js";
+import { AUTH_CALLBACK_PATH } from "../lib/paths.js";
 import {
   addPendingState,
   clearSession,
@@ -30,6 +31,7 @@ interface StartAuthBody {
   language?: string;
   valid_until?: string;
   state?: string;
+  return_url?: string;
 }
 
 interface CallbackQuery {
@@ -61,6 +63,7 @@ const startAuthBodySchema = {
     language: { type: "string", minLength: 2, maxLength: 5 },
     valid_until: { type: "string", minLength: 10 },
     state: { type: "string", minLength: 1 },
+    return_url: { type: "string", minLength: 1 },
   },
 } as const;
 
@@ -132,6 +135,52 @@ function resolveAccessValidUntil(validUntil: string | undefined): Date {
   }
 
   return parsed;
+}
+
+/**
+ * Validates the post-authorization frontend redirect URL.
+ *
+ * @param requested - Optional absolute URL from the request.
+ * @returns The validated URL, or null when none was requested.
+ * @throws {HttpError} When the URL is invalid or uses another origin.
+ */
+function resolveReturnUrl(requested: string | undefined): string | null {
+  if (requested === undefined) return null;
+
+  //else
+
+  let parsed: URL;
+  try {
+    parsed = new URL(requested);
+  } catch {
+    throw new HttpError(400, "invalid_return_url", "return_url must be an absolute URL.");
+  }
+
+  const allowed = new URL(config.server.frontendUrl);
+  if (parsed.origin !== allowed.origin) {
+    throw new HttpError(
+      400,
+      "invalid_return_url",
+      `return_url must use the configured frontend origin (${allowed.origin}).`,
+    );
+  }
+
+  return parsed.toString();
+}
+
+/**
+ * Appends the authorization result to a frontend redirect URL.
+ *
+ * @param returnUrl - Validated frontend URL.
+ * @param status - Authorization outcome.
+ * @param message - Optional error message.
+ * @returns The frontend URL with result query parameters.
+ */
+function withAuthResult(returnUrl: string, status: "success" | "error", message?: string): string {
+  const url = new URL(returnUrl);
+  url.searchParams.set("auth", status);
+  if (message !== undefined) url.searchParams.set("message", message);
+  return url.toString();
 }
 
 /**
@@ -213,9 +262,10 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     async (request) => {
       const body = request.body ?? {};
 
-      // Resolve bank and consent details
+      // Resolve bank, consent, and return URL
       const aspsp = resolveAspsp(body);
       const validUntil = resolveAccessValidUntil(body.valid_until);
+      const returnUrl = resolveReturnUrl(body.return_url);
       const state = body.state ?? randomUUID();
 
       // Start the upstream authorization
@@ -229,7 +279,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       });
 
       // Remember the state until the redirect returns
-      await addPendingState(state);
+      await addPendingState(state, returnUrl);
 
       return {
         url: response.url,
@@ -244,13 +294,20 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
    * Exchange the code for a session and persist it for later API calls.
    */
   app.get<{ Querystring: CallbackQuery }>(
-    "/auth/callback",
+    AUTH_CALLBACK_PATH,
     { schema: { querystring: callbackQuerySchema } },
-    async (request) => {
+    async (request, reply) => {
       const { code, state, error, error_description: errorDescription } = request.query;
 
       // Handle a denied or failed authorization
       if (error !== undefined && error !== "") {
+        const pending =
+          state !== undefined && state !== "" ? await consumePendingState(state) : null;
+        if (pending !== null && pending.returnUrl !== null) {
+          return reply.redirect(
+            withAuthResult(pending.returnUrl, "error", errorDescription ?? error),
+          );
+        }
         throw new HttpError(400, "authorization_failed", errorDescription ?? error);
       }
 
@@ -263,23 +320,38 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       }
 
       // Check that this service issued the state
-      const validState = await consumePendingState(state);
-      if (validState === false) {
+      const pending = await consumePendingState(state);
+      if (pending === null) {
         throw new HttpError(400, "invalid_state", "Unknown or expired state parameter.");
       }
 
       //else
 
-      // Exchange the code and persist the session
-      const result = await completeAuthorization(code);
+      try {
+        // Exchange the code and persist the session
+        const result = await completeAuthorization(code);
 
-      return {
-        ok: true,
-        session_id: result.sessionId,
-        aspsp: result.aspsp,
-        access_valid_until: result.accessValidUntil,
-        accounts: result.accounts,
-      };
+        if (pending.returnUrl !== null) {
+          return reply.redirect(withAuthResult(pending.returnUrl, "success"));
+        }
+
+        return {
+          ok: true,
+          session_id: result.sessionId,
+          aspsp: result.aspsp,
+          access_valid_until: result.accessValidUntil,
+          accounts: result.accounts,
+        };
+      } catch (caught) {
+        if (pending.returnUrl !== null) {
+          const message =
+            caught instanceof EnableBankingError
+              ? (caught.code ?? caught.message)
+              : "Authorization failed";
+          return reply.redirect(withAuthResult(pending.returnUrl, "error", message));
+        }
+        throw caught;
+      }
     },
   );
 

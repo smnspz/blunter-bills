@@ -3,7 +3,12 @@ dist/
 coverage/
 .env
 .env.local
+.env.*.local
 .data/
+*.pem
+*.key
+*.crt
+.playwright-mcp/
 *.log
 *.tsbuildinfo
 .DS_Store
