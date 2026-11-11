@@ -6,6 +6,10 @@ import { after, describe, it } from "node:test";
 import type { StartAuthorizationRequest, TransactionsQuery } from "@blunter-bills/enable-banking";
 import { FakeEnableBankingClient } from "./fixtures/fake-enable-banking.js";
 import { FakeMailOAuth } from "./fixtures/fake-mail-oauth.js";
+import {
+  InMemoryMailRepository,
+  InMemorySessionRepository,
+} from "./fixtures/in-memory-repositories.js";
 
 // Prepare an isolated data directory
 const dataDir = await mkdtemp(join(tmpdir(), "enable-banking-service-"));
@@ -28,7 +32,13 @@ process.env.GOOGLE_REDIRECT_URI = "http://localhost:3000/mail/gmail/callback";
 const { buildApp } = await import("../src/app.js");
 const fake = new FakeEnableBankingClient();
 const mail = new FakeMailOAuth();
-const app = buildApp({ enableBanking: fake, mailOAuth: mail });
+const sessions = new InMemorySessionRepository();
+const mailRepository = new InMemoryMailRepository();
+const app = buildApp({
+  enableBanking: fake,
+  mailOAuth: mail,
+  repositories: { sessions, mail: mailRepository },
+});
 
 after(async () => {
   await app.close();

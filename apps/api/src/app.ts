@@ -10,11 +10,11 @@ import { getConfiguredEnableBanking } from "./enable-banking.js";
 import { HttpError } from "./lib/errors.js";
 import { AUTH_CALLBACK_PATH, HEALTH_PATH, MAIL_CALLBACK_PATH } from "./lib/paths.js";
 import { getConfiguredMailOAuth, type MailOAuth } from "./mail-oauth.js";
+import { createFileRepositories, type AppRepositories } from "./repositories/index.js";
 import { accountRoutes } from "./routes/accounts.js";
 import { authRoutes } from "./routes/auth.js";
 import { mailRoutes } from "./routes/mail.js";
 import { transactionRoutes } from "./routes/transactions.js";
-import { getStoredSession } from "./session-store.js";
 
 const MAX_BODY_BYTES = 1024 * 1024;
 const PUBLIC_PATHS = new Set<string>([HEALTH_PATH, AUTH_CALLBACK_PATH, MAIL_CALLBACK_PATH]);
@@ -25,6 +25,8 @@ export interface AppDependencies {
   enableBanking?: EnableBankingClient;
   /** Gmail OAuth service to use instead of the configured one. */
   mailOAuth?: MailOAuth;
+  /** Repositories to use instead of the file-backed defaults. */
+  repositories?: AppRepositories;
 }
 
 /**
@@ -134,13 +136,14 @@ export function buildApp(dependencies: AppDependencies = {}): FastifyInstance {
   const getEnableBanking = injected !== undefined ? () => injected : getConfiguredEnableBanking;
   const injectedMail = dependencies.mailOAuth;
   const getMailOAuth = injectedMail !== undefined ? () => injectedMail : getConfiguredMailOAuth;
+  const repositories = dependencies.repositories ?? createFileRepositories(config.dataDir);
 
   registerApiKeyHook(app);
   registerErrorHandler(app);
 
   /** Reports liveness, configuration state, and whether a session is stored. */
   app.get(HEALTH_PATH, async () => {
-    const session = await getStoredSession();
+    const session = await repositories.sessions.getSession();
     return {
       status: "ok",
       uptime_seconds: Math.round(process.uptime()),
@@ -149,10 +152,16 @@ export function buildApp(dependencies: AppDependencies = {}): FastifyInstance {
     };
   });
 
-  app.register(authRoutes, { getEnableBanking });
-  app.register(accountRoutes);
-  app.register(transactionRoutes, { getEnableBanking });
-  app.register(mailRoutes, { getMailOAuth });
+  app.register(authRoutes, {
+    getEnableBanking,
+    sessions: repositories.sessions,
+  });
+  app.register(accountRoutes, { sessions: repositories.sessions });
+  app.register(transactionRoutes, {
+    getEnableBanking,
+    sessions: repositories.sessions,
+  });
+  app.register(mailRoutes, { getMailOAuth, mail: repositories.mail });
 
   return app;
 }

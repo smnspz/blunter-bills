@@ -7,7 +7,7 @@ import type {
 import { resolveDateRange, type DateRange } from "../lib/dates.js";
 import { HttpError } from "../lib/errors.js";
 import { isInDateRange, normalizeTransaction, transactionDate } from "../lib/transactions.js";
-import { getStoredSession, type StoredAccount } from "../session-store.js";
+import type { SessionRepository, StoredAccount } from "../repositories/index.js";
 
 interface TransactionsQuerystring {
   account_id?: string;
@@ -27,6 +27,8 @@ interface FetchResult {
 export interface TransactionRoutesOptions {
   /** Returns the Enable Banking client, or throws when it is not configured. */
   getEnableBanking: () => EnableBankingClient;
+  /** Bank session persistence. */
+  sessions: SessionRepository;
 }
 
 /** Safety valve so a broken continuation_key can never loop forever. */
@@ -137,7 +139,7 @@ function compareByDateDesc(a: Transaction, b: Transaction): number {
  * Registers the transaction listing route.
  *
  * @param app - Fastify instance to attach routes to.
- * @param options - Injected Enable Banking client accessor.
+ * @param options - Injected Enable Banking client and repository accessors.
  * @returns Nothing. Resolves once routes are registered.
  */
 export async function transactionRoutes(
@@ -159,7 +161,7 @@ export async function transactionRoutes(
       const query = request.query;
 
       // Load the authorized session
-      const session = await getStoredSession();
+      const session = await options.sessions.getSession();
       if (session === null) {
         throw new HttpError(404, "no_session", "No authorized session. Call POST /auth first.");
       }

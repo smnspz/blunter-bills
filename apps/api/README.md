@@ -109,7 +109,8 @@ pnpm dev
 pnpm build && pnpm start
 ```
 
-`pnpm test` runs the API suite against an injected fake Enable Banking client.
+`pnpm test` runs the API suite against an injected fake Enable Banking client,
+a fake Gmail OAuth service, and in-memory repositories.
 The SDK has its own suite that starts an in-process HTTP mock and verifies JWT
 signing, endpoint serialization, and error mapping. No credentials or network
 access are required for either suite.
@@ -256,7 +257,8 @@ curl "http://localhost:3000/transactions?days=5&raw=true"
   sandbox banks ignore the upstream date filter.
 - `/mail/*` uses `@blunter-bills/mail` for the Gmail consent flow. The refresh
   token is stored in the same `0600` store as the bank session.
-- The session is stored in `${DATA_DIR}/store.json` with mode `0600`.
+- The session and mail connection are persisted through repository interfaces.
+  The default adapter writes `${DATA_DIR}/store.json` with mode `0600`.
 
 This is a single-user service: one stored session at a time. Re-running
 `POST /auth` and completing the flow replaces it.
@@ -271,7 +273,10 @@ src/
   app.ts                    Fastify instance, auth hook, error mapping
   config.ts                 env loading and validation
   enable-banking.ts         configured SDK client accessor
-  session-store.ts          file-backed session + pending state store
+  repositories/
+    contracts.ts            repository interfaces + stored types
+    file.ts                 JSON file adapter (atomic, 0600)
+    index.ts                file repository factory
   lib/
     dates.ts                date parsing and range resolution
     transactions.ts         filtering and normalization
@@ -284,7 +289,15 @@ src/
 test/
   dates.test.ts             date-range unit tests
   transactions.test.ts      filtering and normalization unit tests
-  integration.test.ts       API behavior against the injected fake SDK
+  repositories.test.ts      file repository persistence tests
+  integration.test.ts       API behavior against the injected fakes
   fixtures/
     fake-enable-banking.ts  in-memory Enable Banking fake
+    fake-mail-oauth.ts      in-memory Gmail OAuth fake
+    in-memory-repositories.ts  in-memory repository implementations
 ```
+
+Routes depend only on the repository interfaces in `repositories/contracts.ts`.
+`app.ts` defaults to the file adapter; a future database adapter only needs to
+implement `SessionRepository` and `MailRepository` and be injected via
+`buildApp({ repositories })`.

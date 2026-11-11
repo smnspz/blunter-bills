@@ -13,14 +13,7 @@ import { HttpError } from "../lib/errors.js";
 import { oauthCallbackQuerySchema } from "../lib/oauth.js";
 import { AUTH_CALLBACK_PATH } from "../lib/paths.js";
 import { withQueryParams } from "../lib/url.js";
-import {
-  addPendingState,
-  clearSession,
-  consumePendingState,
-  getStoredSession,
-  saveSession,
-  type StoredAccount,
-} from "../session-store.js";
+import type { SessionRepository, StoredAccount } from "../repositories/index.js";
 
 const MS_PER_DAY = 86_400_000;
 
@@ -57,6 +50,8 @@ interface AuthorizationResult {
 export interface AuthRoutesOptions {
   /** Returns the Enable Banking client, or throws when it is not configured. */
   getEnableBanking: () => EnableBankingClient;
+  /** Bank session persistence. */
+  sessions: SessionRepository;
 }
 
 const startAuthBodySchema = {
@@ -179,12 +174,14 @@ function withAuthResult(returnUrl: string, status: "success" | "error", message?
  * Exchanges an authorization code for a session and persists it locally.
  *
  * @param enableBanking - Enable Banking client to use.
+ * @param sessions - Bank session repository.
  * @param code - Authorization code returned by Enable Banking.
  * @returns The persisted session data plus the account list.
  * @throws {EnableBankingError} When Enable Banking rejects the code.
  */
 async function completeAuthorization(
   enableBanking: EnableBankingClient,
+  sessions: SessionRepository,
   code: string,
 ): Promise<AuthorizationResult> {
   // Exchange the code for a session
@@ -193,7 +190,7 @@ async function completeAuthorization(
   const accessValidUntil = session.access?.valid_until ?? null;
 
   // Persist the session for later requests
-  await saveSession({
+  await sessions.saveSession({
     sessionId: session.session_id,
     accounts,
     aspspName: session.aspsp.name,
@@ -216,7 +213,7 @@ async function completeAuthorization(
  * Registers bank authorization and session routes.
  *
  * @param app - Fastify instance to attach routes to.
- * @param options - Injected Enable Banking client accessor.
+ * @param options - Injected Enable Banking client and repository accessors.
  * @returns Nothing. Resolves once routes are registered.
  */
 export async function authRoutes(app: FastifyInstance, options: AuthRoutesOptions): Promise<void> {
@@ -277,7 +274,7 @@ export async function authRoutes(app: FastifyInstance, options: AuthRoutesOption
       });
 
       // Remember the state until the redirect returns
-      await addPendingState(state, returnUrl);
+      await options.sessions.addPendingState(state, returnUrl);
 
       return {
         url: response.url,
@@ -300,7 +297,9 @@ export async function authRoutes(app: FastifyInstance, options: AuthRoutesOption
       // Handle a denied or failed authorization
       if (error !== undefined && error !== "") {
         const pending =
-          state !== undefined && state !== "" ? await consumePendingState(state) : null;
+          state !== undefined && state !== ""
+            ? await options.sessions.consumePendingState(state)
+            : null;
         if (pending !== null && pending.returnUrl !== null) {
           return reply.redirect(
             withAuthResult(pending.returnUrl, "error", errorDescription ?? error),
@@ -318,7 +317,7 @@ export async function authRoutes(app: FastifyInstance, options: AuthRoutesOption
       }
 
       // Check that this service issued the state
-      const pending = await consumePendingState(state);
+      const pending = await options.sessions.consumePendingState(state);
       if (pending === null) {
         throw new HttpError(400, "invalid_state", "Unknown or expired state parameter.");
       }
@@ -328,7 +327,7 @@ export async function authRoutes(app: FastifyInstance, options: AuthRoutesOption
       try {
         // Exchange the code and persist the session
         const enableBanking = options.getEnableBanking();
-        const result = await completeAuthorization(enableBanking, code);
+        const result = await completeAuthorization(enableBanking, options.sessions, code);
 
         if (pending.returnUrl !== null) {
           return reply.redirect(withAuthResult(pending.returnUrl, "success"));
@@ -356,7 +355,7 @@ export async function authRoutes(app: FastifyInstance, options: AuthRoutesOption
 
   /** Returns the locally stored session (no upstream call). */
   app.get("/session", async () => {
-    const session = await getStoredSession();
+    const session = await options.sessions.getSession();
     if (session === null) {
       throw new HttpError(404, "no_session", "No authorized session. Call POST /auth first.");
     }
@@ -375,7 +374,7 @@ export async function authRoutes(app: FastifyInstance, options: AuthRoutesOption
 
   /** Verifies the session with Enable Banking, then deletes it and clears local state. */
   app.delete("/session", async () => {
-    const session = await getStoredSession();
+    const session = await options.sessions.getSession();
     if (session === null) {
       throw new HttpError(404, "no_session", "No authorized session to delete.");
     }
@@ -395,7 +394,7 @@ export async function authRoutes(app: FastifyInstance, options: AuthRoutesOption
     }
 
     // Clear local state
-    await clearSession();
+    await options.sessions.clearSession();
     return { ok: true, message: "Session deleted." };
   });
 }

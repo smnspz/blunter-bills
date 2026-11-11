@@ -6,13 +6,7 @@ import { oauthCallbackQuerySchema } from "../lib/oauth.js";
 import { MAIL_CALLBACK_PATH } from "../lib/paths.js";
 import { withQueryParams } from "../lib/url.js";
 import type { MailOAuth } from "../mail-oauth.js";
-import {
-  addMailPendingState,
-  clearMailConnection,
-  consumeMailPendingState,
-  getMailConnection,
-  saveMailConnection,
-} from "../session-store.js";
+import type { MailRepository } from "../repositories/index.js";
 
 interface MailCallbackQuery {
   code?: string;
@@ -25,6 +19,8 @@ interface MailCallbackQuery {
 export interface MailRoutesOptions {
   /** Returns the Gmail OAuth service, or throws when it is not configured. */
   getMailOAuth: () => MailOAuth;
+  /** Mail connection persistence. */
+  mail: MailRepository;
 }
 
 /**
@@ -43,13 +39,13 @@ function mailSetupUrl(status: "success" | "error", message?: string): string {
  * Registers the Gmail connection routes.
  *
  * @param app - Fastify instance to attach routes to.
- * @param options - Injected Gmail OAuth service accessor.
+ * @param options - Injected Gmail OAuth service and repository accessors.
  * @returns Nothing. Resolves once routes are registered.
  */
 export async function mailRoutes(app: FastifyInstance, options: MailRoutesOptions): Promise<void> {
   /** Reports whether Gmail OAuth is configured and a mailbox is connected. */
   app.get("/mail/status", async () => {
-    const connection = await getMailConnection();
+    const connection = await options.mail.getConnection();
     return {
       configured: missingMailConfig().length === 0,
       connected: connection !== null,
@@ -62,7 +58,7 @@ export async function mailRoutes(app: FastifyInstance, options: MailRoutesOption
   app.post("/mail/gmail/start", async () => {
     const mailOAuth = options.getMailOAuth();
     const state = randomUUID();
-    await addMailPendingState(state);
+    await options.mail.addPendingState(state);
     return { url: mailOAuth.createAuthorizationUrl(state), state };
   });
 
@@ -90,7 +86,7 @@ export async function mailRoutes(app: FastifyInstance, options: MailRoutesOption
       }
 
       // Check that this service issued the state
-      const validState = await consumeMailPendingState(state);
+      const validState = await options.mail.consumePendingState(state);
       if (validState === false) {
         return reply.redirect(mailSetupUrl("error", "invalid_state"));
       }
@@ -106,7 +102,7 @@ export async function mailRoutes(app: FastifyInstance, options: MailRoutesOption
           return reply.redirect(mailSetupUrl("error", "no_refresh_token"));
         }
 
-        await saveMailConnection({
+        await options.mail.saveConnection({
           provider: "gmail",
           refreshToken: tokens.refreshToken,
           connectedAt: new Date().toISOString(),
@@ -123,7 +119,7 @@ export async function mailRoutes(app: FastifyInstance, options: MailRoutesOption
 
   /** Disconnects the stored mailbox. */
   app.delete("/mail", async () => {
-    await clearMailConnection();
+    await options.mail.clearConnection();
     return { ok: true };
   });
 }
