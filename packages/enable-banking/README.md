@@ -50,13 +50,18 @@ use different credentials safely.
 - `EnableBankingConfigurationError` — missing/invalid `appId`, `privateKeyPem`,
   or `baseUrl`.
 
-## Development
+## Testing
 
 ```bash
 pnpm --filter @blunter-bills/enable-banking test
 pnpm --filter @blunter-bills/enable-banking typecheck
-pnpm --filter @blunter-bills/enable-banking build
 ```
 
 Tests spin up an in-process HTTP mock, generate a throwaway RSA key, verify the
 JWT header/signature, and exercise endpoint serialization and error mapping.
+
+## Build
+
+```bash
+pnpm --filter @blunter-bills/enable-banking build
+```
