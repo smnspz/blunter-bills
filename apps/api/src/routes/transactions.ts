@@ -1,6 +1,9 @@
 import type { FastifyInstance } from "fastify";
-import { getTransactions } from "../enablebanking/api.js";
-import type { Transaction, TransactionStatus } from "../enablebanking/types.js";
+import type {
+  EnableBankingClient,
+  Transaction,
+  TransactionStatus,
+} from "@blunter-bills/enable-banking";
 import { resolveDateRange, type DateRange } from "../lib/dates.js";
 import { HttpError } from "../lib/errors.js";
 import { isInDateRange, normalizeTransaction, transactionDate } from "../lib/transactions.js";
@@ -18,6 +21,12 @@ interface TransactionsQuerystring {
 interface FetchResult {
   transactions: Transaction[];
   truncated: boolean;
+}
+
+/** Dependencies required by the transaction routes. */
+export interface TransactionRoutesOptions {
+  /** Returns the Enable Banking client, or throws when it is not configured. */
+  getEnableBanking: () => EnableBankingClient;
 }
 
 /** Safety valve so a broken continuation_key can never loop forever. */
@@ -77,6 +86,7 @@ function selectAccount(accounts: StoredAccount[], accountId: string | undefined)
 /**
  * Fetches every page of transactions for an account.
  *
+ * @param enableBanking - Enable Banking client to use.
  * @param accountId - Account uid exposed by the authorized session.
  * @param range - Inclusive date window to request.
  * @param status - Optional transaction status filter.
@@ -84,6 +94,7 @@ function selectAccount(accounts: StoredAccount[], accountId: string | undefined)
  * @throws {EnableBankingError} When an upstream request fails.
  */
 async function fetchAllTransactions(
+  enableBanking: EnableBankingClient,
   accountId: string,
   range: DateRange,
   status: TransactionStatus | undefined,
@@ -94,7 +105,7 @@ async function fetchAllTransactions(
 
   // Page through the upstream response
   do {
-    const page = await getTransactions(accountId, {
+    const page = await enableBanking.getTransactions(accountId, {
       date_from: range.from,
       date_to: range.to,
       ...(status !== undefined ? { transaction_status: status } : {}),
@@ -126,9 +137,13 @@ function compareByDateDesc(a: Transaction, b: Transaction): number {
  * Registers the transaction listing route.
  *
  * @param app - Fastify instance to attach routes to.
+ * @param options - Injected Enable Banking client accessor.
  * @returns Nothing. Resolves once routes are registered.
  */
-export async function transactionRoutes(app: FastifyInstance): Promise<void> {
+export async function transactionRoutes(
+  app: FastifyInstance,
+  options: TransactionRoutesOptions,
+): Promise<void> {
   /**
    * Lists transactions for the authorized account, filtered by date.
    *
@@ -160,7 +175,9 @@ export async function transactionRoutes(app: FastifyInstance): Promise<void> {
       });
 
       // Fetch and page through transactions
+      const enableBanking = options.getEnableBanking();
       const { transactions, truncated } = await fetchAllTransactions(
+        enableBanking,
         account.uid,
         range,
         query.status,

@@ -10,6 +10,27 @@ export interface Aspsp {
   country: string;
 }
 
+/** Bank metadata returned by GET /aspsps. */
+export interface AspspInfo {
+  name: string;
+  country: string;
+  logo?: string;
+  psu_types?: string[];
+  auth_methods?: unknown[];
+  beta?: boolean;
+}
+
+/** Response from GET /aspsps. */
+export interface GetAspspsResponse {
+  aspsps: AspspInfo[];
+}
+
+/** Filters accepted by GET /aspsps. */
+export interface GetAspspsQuery {
+  country?: string;
+  service?: string;
+}
+
 /** Request body for POST /auth. */
 export interface StartAuthorizationRequest {
   access: { valid_until: string };
@@ -101,6 +122,14 @@ export interface Transaction {
 export interface TransactionsPage {
   transactions: Transaction[];
   continuation_key?: string | null;
+}
+
+/** Filters accepted by GET /accounts/{id}/transactions. */
+export interface TransactionsQuery {
+  date_from?: string;
+  date_to?: string;
+  continuation_key?: string;
+  transaction_status?: TransactionStatus;
 }
 
 /** Response from GET /sessions/{session_id}. */

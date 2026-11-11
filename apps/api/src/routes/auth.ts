@@ -1,16 +1,14 @@
 import { randomUUID } from "node:crypto";
+import {
+  EnableBankingError,
+  type Aspsp,
+  type EnableBankingClient,
+  type GetAspspsQuery,
+  type PsuType,
+  type SessionAccount,
+} from "@blunter-bills/enable-banking";
 import type { FastifyInstance } from "fastify";
 import { config } from "../config.js";
-import {
-  authorizeSession,
-  deleteSession,
-  getAspsps,
-  getSession,
-  startAuthorization,
-  type GetAspspsQuery,
-} from "../enablebanking/api.js";
-import { EnableBankingError } from "../enablebanking/client.js";
-import type { Aspsp, PsuType, SessionAccount } from "../enablebanking/types.js";
 import { HttpError } from "../lib/errors.js";
 import { AUTH_CALLBACK_PATH } from "../lib/paths.js";
 import {
@@ -51,6 +49,12 @@ interface AuthorizationResult {
   accounts: StoredAccount[];
   aspsp: Aspsp;
   accessValidUntil: string | null;
+}
+
+/** Dependencies required by the auth routes. */
+export interface AuthRoutesOptions {
+  /** Returns the Enable Banking client, or throws when it is not configured. */
+  getEnableBanking: () => EnableBankingClient;
 }
 
 const startAuthBodySchema = {
@@ -186,13 +190,17 @@ function withAuthResult(returnUrl: string, status: "success" | "error", message?
 /**
  * Exchanges an authorization code for a session and persists it locally.
  *
+ * @param enableBanking - Enable Banking client to use.
  * @param code - Authorization code returned by Enable Banking.
  * @returns The persisted session data plus the account list.
  * @throws {EnableBankingError} When Enable Banking rejects the code.
  */
-async function completeAuthorization(code: string): Promise<AuthorizationResult> {
+async function completeAuthorization(
+  enableBanking: EnableBankingClient,
+  code: string,
+): Promise<AuthorizationResult> {
   // Exchange the code for a session
-  const session = await authorizeSession(code);
+  const session = await enableBanking.authorizeSession(code);
   const accounts = toStoredAccounts(session.accounts);
   const accessValidUntil = session.access?.valid_until ?? null;
 
@@ -220,9 +228,10 @@ async function completeAuthorization(code: string): Promise<AuthorizationResult>
  * Registers bank authorization and session routes.
  *
  * @param app - Fastify instance to attach routes to.
+ * @param options - Injected Enable Banking client accessor.
  * @returns Nothing. Resolves once routes are registered.
  */
-export async function authRoutes(app: FastifyInstance): Promise<void> {
+export async function authRoutes(app: FastifyInstance, options: AuthRoutesOptions): Promise<void> {
   /** Lists the banks (ASPSPs) available to this application. */
   app.get<{ Querystring: AspspsQuery }>(
     "/aspsps",
@@ -248,7 +257,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
         query.service = request.query.service;
       }
 
-      return getAspsps(query);
+      return options.getEnableBanking().listAspsps(query);
     },
   );
 
@@ -269,7 +278,8 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       const state = body.state ?? randomUUID();
 
       // Start the upstream authorization
-      const response = await startAuthorization({
+      const enableBanking = options.getEnableBanking();
+      const response = await enableBanking.startAuthorization({
         access: { valid_until: validUntil.toISOString() },
         aspsp,
         redirect_url: config.enableBanking.redirectUrl,
@@ -329,7 +339,8 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
 
       try {
         // Exchange the code and persist the session
-        const result = await completeAuthorization(code);
+        const enableBanking = options.getEnableBanking();
+        const result = await completeAuthorization(enableBanking, code);
 
         if (pending.returnUrl !== null) {
           return reply.redirect(withAuthResult(pending.returnUrl, "success"));
@@ -383,14 +394,16 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
 
     //else
 
+    const enableBanking = options.getEnableBanking();
+
     // Verify upstream, tolerating an already-forgotten session
-    const upstream = await getSession(session.sessionId).catch((caught: unknown) => {
+    const upstream = await enableBanking.getSession(session.sessionId).catch((caught: unknown) => {
       if (caught instanceof EnableBankingError && caught.status === 404) return null;
       throw caught;
     });
 
     if (upstream !== null) {
-      await deleteSession(session.sessionId);
+      await enableBanking.deleteSession(session.sessionId);
     }
 
     // Clear local state

@@ -2,18 +2,18 @@
   "name": "@blunter-bills/api",
   "version": "0.1.0",
   "private": true,
-  "description": "Enable Banking API wrapper for Blunter Bills",
+  "description": "Fastify backend for Blunter Bills",
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/server.ts",
+    "dev": "NODE_OPTIONS=--conditions=development tsx watch src/server.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/server.js",
     "typecheck": "tsc -p tsconfig.test.json",
-    "test": "node --import tsx --test \"test/**/*.test.ts\""
+    "test": "NODE_OPTIONS=--conditions=development node --import tsx --test \"test/**/*.test.ts\""
   },
   "dependencies": {
-    "fastify": "^5.2.1",
-    "jose": "^6.0.11"
+    "@blunter-bills/enable-banking": "workspace:*",
+    "fastify": "^5.2.1"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { Transaction } from "../src/enablebanking/types.js";
+import type { Transaction } from "@blunter-bills/enable-banking";
 import { isInDateRange, normalizeTransaction, transactionDate } from "../src/lib/transactions.js";
 
 describe("transactionDate", () => {

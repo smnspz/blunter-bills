@@ -2,7 +2,9 @@
 
 A small [Fastify](https://fastify.dev/) + TypeScript service that wraps the
 [Enable Banking](https://enablebanking.com/docs/api/reference/) account
-information API. It is the backend of the `blunter-bills` monorepo.
+information API. It is the backend of the `blunter-bills` monorepo and consumes
+the standalone [`@blunter-bills/enable-banking`](../../packages/enable-banking/README.md)
+client.
 
 First exposed API: **list transactions for your bank account, filtered by date**
 (e.g. the last 5 days).
@@ -104,9 +106,10 @@ pnpm dev
 pnpm build && pnpm start
 ```
 
-`pnpm test` runs both unit tests and an end-to-end suite that starts an
-in-process Enable Banking mock on an ephemeral port, using a throwaway RSA key
-and a temporary data directory. No credentials or network access are required.
+`pnpm test` runs the API suite against an injected fake Enable Banking client.
+The SDK has its own suite that starts an in-process HTTP mock and verifies JWT
+signing, endpoint serialization, and error mapping. No credentials or network
+access are required for either suite.
 
 ## 4. Authorize your bank account
 
@@ -233,7 +236,9 @@ curl "http://localhost:3000/transactions?days=5&raw=true"
 ## How it works
 
 - Every Enable Banking request carries a cached RS256 JWT
-  (`kid` = app ID, `iss` = `enablebanking.com`).
+  (`kid` = app ID, `iss` = `enablebanking.com`). This lives in the
+  `@blunter-bills/enable-banking` package; the API obtains a configured client
+  from `src/enable-banking.ts`.
 - `POST /auth` generates a `state`, asks Enable Banking for a redirect URL, and
   remembers the state for 15 minutes.
 - `GET /auth/callback` verifies `state`, calls `POST /sessions` with the
@@ -256,15 +261,13 @@ src/
   server.ts                 entry point, graceful shutdown
   app.ts                    Fastify instance, auth hook, error mapping
   config.ts                 env loading and validation
+  enable-banking.ts         configured SDK client accessor
   session-store.ts          file-backed session + pending state store
-  enablebanking/
-    client.ts               JWT signing and authenticated fetch wrapper
-    api.ts                  typed Enable Banking endpoints
-    types.ts                API schemas used by this service
   lib/
     dates.ts                date parsing and range resolution
     transactions.ts         filtering and normalization
     errors.ts               HttpError
+    paths.ts                public path constants
   routes/
     auth.ts                 /aspsps, /auth, /session
     accounts.ts             /accounts
@@ -272,7 +275,7 @@ src/
 test/
   dates.test.ts             date-range unit tests
   transactions.test.ts      filtering and normalization unit tests
-  integration.test.ts       end-to-end flow against the mock
+  integration.test.ts       API behavior against the injected fake SDK
   fixtures/
-    mock-enable-banking.ts  reusable in-process Enable Banking mock
+    fake-enable-banking.ts  in-memory Enable Banking fake
 ```

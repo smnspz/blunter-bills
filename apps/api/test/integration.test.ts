@@ -1,37 +1,32 @@
 import assert from "node:assert/strict";
-import { generateKeyPairSync } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, describe, it } from "node:test";
-import { startMockEnableBanking } from "./fixtures/mock-enable-banking.js";
+import type { StartAuthorizationRequest, TransactionsQuery } from "@blunter-bills/enable-banking";
+import { FakeEnableBankingClient } from "./fixtures/fake-enable-banking.js";
 
-// Prepare an isolated data directory and a throwaway RS256 key
+// Prepare an isolated data directory
 const dataDir = await mkdtemp(join(tmpdir(), "enable-banking-service-"));
-const mock = await startMockEnableBanking();
-const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
 
 // Configure the service before importing modules that read config
 process.env.ENV_FILE = join(dataDir, "missing.env");
 process.env.DATA_DIR = dataDir;
 process.env.LOG_LEVEL = "silent";
 process.env.SERVICE_API_KEY = "test-secret";
+process.env.FRONTEND_URL = "http://localhost:5173";
 process.env.ENABLE_BANKING_APP_ID = "test-app";
-process.env.ENABLE_BANKING_PRIVATE_KEY = privateKey
-  .export({ type: "pkcs8", format: "pem" })
-  .toString();
-process.env.ENABLE_BANKING_BASE_URL = mock.url;
+process.env.ENABLE_BANKING_PRIVATE_KEY = "dummy";
 process.env.ENABLE_BANKING_REDIRECT_URL = "http://localhost/auth/callback";
 process.env.ENABLE_BANKING_ASPSP_NAME = "Mock ASPSP";
 process.env.ENABLE_BANKING_ASPSP_COUNTRY = "FI";
-process.env.FRONTEND_URL = "http://localhost:5173";
 
 const { buildApp } = await import("../src/app.js");
-const app = buildApp();
+const fake = new FakeEnableBankingClient();
+const app = buildApp({ enableBanking: fake });
 
 after(async () => {
   await app.close();
-  await mock.close();
   await rm(dataDir, { recursive: true, force: true });
 });
 
@@ -73,7 +68,7 @@ function isoDay(offset: number): string {
   return date.toISOString().slice(0, 10);
 }
 
-describe("Enable Banking service integration", () => {
+describe("Blunter Bills API", () => {
   let pendingState = "";
 
   it("serves health without the service key", async () => {
@@ -124,11 +119,11 @@ describe("Enable Banking service integration", () => {
       "Mock ASPSP",
     );
 
-    const upstream = mock.calls.filter((entry) => entry.path === "/aspsps").at(-1);
-    assert.equal(upstream?.query.get("country"), "FI");
+    const upstream = fake.callsFor("listAspsps").at(-1);
+    assert.equal((upstream?.args[0] as { country?: string }).country, "FI");
   });
 
-  it("starts authorization and forwards a signed JWT", async () => {
+  it("starts authorization with the selected bank", async () => {
     const response = await call({ method: "POST", url: "/auth", body: { psu_type: "personal" } });
     assert.equal(response.statusCode, 200);
 
@@ -136,8 +131,13 @@ describe("Enable Banking service integration", () => {
     assert.match(body.url, /\?state=/);
     assert.equal(body.authorization_id, "authorization-1");
 
-    const upstream = mock.calls.filter((entry) => entry.path === "/auth").at(-1);
-    assert.match(upstream?.authorization ?? "", /^Bearer /);
+    const upstream = fake.callsFor("startAuthorization").at(-1);
+    const input = upstream?.args[0] as StartAuthorizationRequest;
+    assert.equal(input.aspsp.name, "Mock ASPSP");
+    assert.equal(input.aspsp.country, "FI");
+    assert.equal(input.redirect_url, "http://localhost/auth/callback");
+    assert.equal(input.psu_type, "personal");
+    assert.equal(input.state, body.state);
 
     pendingState = body.state;
   });
@@ -213,12 +213,15 @@ describe("Enable Banking service integration", () => {
     assert.equal(body.transactions[2]?.direction, "credit");
     assert.equal(body.transactions[0]?.date, isoDay(0));
 
-    const upstreamCalls = mock.calls.filter(
-      (entry) => entry.path === "/accounts/acc-1/transactions",
+    const upstreamCalls = fake.callsFor("getTransactions");
+    const firstQuery = upstreamCalls[0]?.args[1] as TransactionsQuery;
+    assert.equal(firstQuery.date_from, isoDay(-5));
+    assert.equal(firstQuery.date_to, isoDay(0));
+    assert.ok(
+      upstreamCalls.some(
+        (entry) => (entry.args[1] as TransactionsQuery).continuation_key === "page-2",
+      ),
     );
-    assert.equal(upstreamCalls[0]?.query.get("date_from"), isoDay(-5));
-    assert.equal(upstreamCalls[0]?.query.get("date_to"), isoDay(0));
-    assert.ok(upstreamCalls.some((entry) => entry.query.get("continuation_key") === "page-2"));
   });
 
   it("honours an explicit from/to range", async () => {
@@ -265,28 +268,28 @@ describe("Enable Banking service integration", () => {
   });
 
   it("passes rate-limit errors through", async () => {
-    mock.setMode("rate-limited");
+    fake.setMode("rate-limited");
     const response = await call({ method: "GET", url: "/transactions" });
     assert.equal(response.statusCode, 429);
     assert.equal(response.json<{ error: string }>().error, "ASPSP_RATE_LIMIT_EXCEEDED");
   });
 
   it("maps expired sessions to a bad-gateway error", async () => {
-    mock.setMode("expired-session");
+    fake.setMode("expired-session");
     const response = await call({ method: "GET", url: "/transactions" });
     assert.equal(response.statusCode, 502);
     assert.equal(response.json<{ error: string }>().error, "EXPIRED_SESSION");
   });
 
   it("maps upstream outages to a bad-gateway error", async () => {
-    mock.setMode("upstream-error");
+    fake.setMode("upstream-error");
     const response = await call({ method: "GET", url: "/transactions" });
     assert.equal(response.statusCode, 502);
     assert.equal(response.json<{ error: string }>().error, "ASPSP_ERROR");
   });
 
   it("deletes the session and clears local state", async () => {
-    mock.setMode("ok");
+    fake.setMode("ok");
 
     const deletion = await call({ method: "DELETE", url: "/session" });
     assert.equal(deletion.statusCode, 200);

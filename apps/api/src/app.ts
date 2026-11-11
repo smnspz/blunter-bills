@@ -1,7 +1,12 @@
 import { timingSafeEqual } from "node:crypto";
+import {
+  EnableBankingConfigurationError,
+  EnableBankingError,
+  type EnableBankingClient,
+} from "@blunter-bills/enable-banking";
 import Fastify, { type FastifyError, type FastifyInstance } from "fastify";
 import { config, missingEnableBankingConfig } from "./config.js";
-import { EnableBankingError } from "./enablebanking/client.js";
+import { getConfiguredEnableBanking } from "./enable-banking.js";
 import { HttpError } from "./lib/errors.js";
 import { AUTH_CALLBACK_PATH, HEALTH_PATH } from "./lib/paths.js";
 import { accountRoutes } from "./routes/accounts.js";
@@ -11,6 +16,12 @@ import { getStoredSession } from "./session-store.js";
 
 const MAX_BODY_BYTES = 1024 * 1024;
 const PUBLIC_PATHS = new Set<string>([HEALTH_PATH, AUTH_CALLBACK_PATH]);
+
+/** Dependencies that can be injected into the app, primarily for tests. */
+export interface AppDependencies {
+  /** Enable Banking client to use instead of the configured one. */
+  enableBanking?: EnableBankingClient;
+}
 
 /**
  * Compares two strings without leaking their contents through timing.
@@ -26,7 +37,7 @@ function safeEqual(a: string, b: string): boolean {
 }
 
 /**
- * Registers optional bearer-token protection for everything except /health.
+ * Registers optional bearer-token protection for every non-public route.
  *
  * @param app - Fastify instance to attach the hook to.
  * @returns Nothing. Registers the hook.
@@ -66,6 +77,12 @@ function registerErrorHandler(app: FastifyInstance): void {
     if (error instanceof HttpError) {
       return reply.code(error.statusCode).send({ error: error.code, message: error.message });
     }
+    if (error instanceof EnableBankingConfigurationError) {
+      return reply.code(500).send({
+        error: "invalid_enable_banking_config",
+        message: error.message,
+      });
+    }
     if (error instanceof EnableBankingError) {
       // Upstream auth failures are our configuration problem, not the caller's.
       const passthrough =
@@ -100,13 +117,17 @@ function registerErrorHandler(app: FastifyInstance): void {
 /**
  * Builds the Fastify application with routes, auth, and error mapping.
  *
+ * @param dependencies - Optional injected dependencies, primarily for tests.
  * @returns The configured Fastify instance, not yet listening.
  */
-export function buildApp(): FastifyInstance {
+export function buildApp(dependencies: AppDependencies = {}): FastifyInstance {
   const app = Fastify({
     logger: { level: config.server.logLevel },
     bodyLimit: MAX_BODY_BYTES,
   });
+
+  const injected = dependencies.enableBanking;
+  const getEnableBanking = injected !== undefined ? () => injected : getConfiguredEnableBanking;
 
   registerApiKeyHook(app);
   registerErrorHandler(app);
@@ -122,9 +143,9 @@ export function buildApp(): FastifyInstance {
     };
   });
 
-  app.register(authRoutes);
+  app.register(authRoutes, { getEnableBanking });
   app.register(accountRoutes);
-  app.register(transactionRoutes);
+  app.register(transactionRoutes, { getEnableBanking });
 
   return app;
 }

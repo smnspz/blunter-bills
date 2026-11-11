@@ -1,4 +1,4 @@
-import type { Transaction } from "../enablebanking/types.js";
+import type { Transaction } from "@blunter-bills/enable-banking";
 
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 

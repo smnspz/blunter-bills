@@ -7,12 +7,18 @@ A small personal finance app: a Fastify API that wraps [Enable Banking](https://
 ```
 blunter-bills/
   apps/
-    api/   Fastify + TypeScript Enable Banking wrapper
+    api/   Fastify + TypeScript backend
     web/   Vite + React 19 + React Compiler + Tailwind v4 SPA
+  packages/
+    enable-banking/  standalone typed Enable Banking client (SDK)
 ```
 
-The API owns the Enable Banking JWT, the bank authorization flow, the stored
-session, and the transaction endpoints. The web app only talks to the API.
+The `enable-banking` package owns the Enable Banking JWT and upstream client.
+The API owns the authorization flow, stored session, and HTTP endpoints. The
+web app only talks to the API.
+
+The SDK has no dependency on Fastify or the API's environment. It is tested
+against an in-process HTTP mock; the API is tested against an injected fake SDK.
 
 ## Quick start
 
@@ -52,7 +58,7 @@ pnpm dev:api
 pnpm dev:web
 pnpm build
 pnpm typecheck
-pnpm test           # API unit + integration tests
+pnpm test           # SDK + API tests
 pnpm format
 pnpm format:check
 ```
