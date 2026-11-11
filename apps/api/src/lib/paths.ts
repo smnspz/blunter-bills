@@ -3,3 +3,6 @@ export const HEALTH_PATH = "/health";
 
 /** Browser-facing OAuth redirect target; must stay reachable without the service key. */
 export const AUTH_CALLBACK_PATH = "/auth/callback";
+
+/** Browser-facing Gmail OAuth redirect target; must stay reachable without the service key. */
+export const MAIL_CALLBACK_PATH = "/mail/gmail/callback";

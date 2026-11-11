@@ -8,19 +8,23 @@ import Fastify, { type FastifyError, type FastifyInstance } from "fastify";
 import { config, missingEnableBankingConfig } from "./config.js";
 import { getConfiguredEnableBanking } from "./enable-banking.js";
 import { HttpError } from "./lib/errors.js";
-import { AUTH_CALLBACK_PATH, HEALTH_PATH } from "./lib/paths.js";
+import { AUTH_CALLBACK_PATH, HEALTH_PATH, MAIL_CALLBACK_PATH } from "./lib/paths.js";
+import { getConfiguredMailOAuth, type MailOAuth } from "./mail-oauth.js";
 import { accountRoutes } from "./routes/accounts.js";
 import { authRoutes } from "./routes/auth.js";
+import { mailRoutes } from "./routes/mail.js";
 import { transactionRoutes } from "./routes/transactions.js";
 import { getStoredSession } from "./session-store.js";
 
 const MAX_BODY_BYTES = 1024 * 1024;
-const PUBLIC_PATHS = new Set<string>([HEALTH_PATH, AUTH_CALLBACK_PATH]);
+const PUBLIC_PATHS = new Set<string>([HEALTH_PATH, AUTH_CALLBACK_PATH, MAIL_CALLBACK_PATH]);
 
 /** Dependencies that can be injected into the app, primarily for tests. */
 export interface AppDependencies {
   /** Enable Banking client to use instead of the configured one. */
   enableBanking?: EnableBankingClient;
+  /** Gmail OAuth service to use instead of the configured one. */
+  mailOAuth?: MailOAuth;
 }
 
 /**
@@ -128,6 +132,8 @@ export function buildApp(dependencies: AppDependencies = {}): FastifyInstance {
 
   const injected = dependencies.enableBanking;
   const getEnableBanking = injected !== undefined ? () => injected : getConfiguredEnableBanking;
+  const injectedMail = dependencies.mailOAuth;
+  const getMailOAuth = injectedMail !== undefined ? () => injectedMail : getConfiguredMailOAuth;
 
   registerApiKeyHook(app);
   registerErrorHandler(app);
@@ -146,6 +152,7 @@ export function buildApp(dependencies: AppDependencies = {}): FastifyInstance {
   app.register(authRoutes, { getEnableBanking });
   app.register(accountRoutes);
   app.register(transactionRoutes, { getEnableBanking });
+  app.register(mailRoutes, { getMailOAuth });
 
   return app;
 }

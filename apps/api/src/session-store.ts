@@ -35,9 +35,23 @@ export interface PendingState {
   returnUrl: string | null;
 }
 
+/** Connected mail account persisted between requests. */
+export interface StoredMailConnection {
+  provider: "gmail";
+  refreshToken: string;
+  connectedAt: string;
+}
+
+interface MailPendingState {
+  state: string;
+  createdAt: string;
+}
+
 interface StoreData {
   session: StoredSession | null;
   pendingStates: PendingState[];
+  mail: StoredMailConnection | null;
+  mailPendingStates: MailPendingState[];
 }
 
 const storeFile = join(config.dataDir, STORE_FILE_NAME);
@@ -48,23 +62,32 @@ let writeChain: Promise<void> = Promise.resolve();
 /**
  * Creates an empty store.
  *
- * @returns A store with no session and no pending states.
+ * @returns A store with no session, pending states, or mail connection.
  */
 function createEmptyStore(): StoreData {
-  return { session: null, pendingStates: [] };
+  return { session: null, pendingStates: [], mail: null, mailPendingStates: [] };
 }
 
 /**
- * Removes pending states older than the TTL.
+ * Removes states older than the TTL.
+ *
+ * @param states - Pending states to filter.
+ * @returns The states that are still valid.
+ */
+function pruneStates<T extends { createdAt: string }>(states: T[]): T[] {
+  const cutoff = Date.now() - PENDING_STATE_TTL_MS;
+  return states.filter((state) => new Date(state.createdAt).getTime() > cutoff);
+}
+
+/**
+ * Removes pending bank and mail states older than the TTL.
  *
  * @param store - Store to prune in place.
  * @returns Nothing. Mutates the store.
  */
 function prunePendingStates(store: StoreData): void {
-  const cutoff = Date.now() - PENDING_STATE_TTL_MS;
-  store.pendingStates = store.pendingStates.filter(
-    (pending) => new Date(pending.createdAt).getTime() > cutoff,
-  );
+  store.pendingStates = pruneStates(store.pendingStates);
+  store.mailPendingStates = pruneStates(store.mailPendingStates);
 }
 
 /**
@@ -95,11 +118,13 @@ async function load(): Promise<StoreData> {
     throw new Error(`Could not parse ${storeFile}. Fix or delete it before starting the service.`);
   }
 
-  // Normalize stores written before return URLs were tracked
+  // Normalize stores written before mail and return URLs were tracked
   cache.pendingStates = cache.pendingStates.map((pending) => ({
     ...pending,
     returnUrl: pending.returnUrl ?? null,
   }));
+  cache.mail = cache.mail ?? null;
+  cache.mailPendingStates = cache.mailPendingStates ?? [];
 
   prunePendingStates(cache);
   return cache;
@@ -197,4 +222,70 @@ export async function consumePendingState(state: string): Promise<PendingState |
   const [pending] = store.pendingStates.splice(index, 1);
   await persist(store);
   return pending ?? null;
+}
+
+/**
+ * Returns the stored mail connection.
+ *
+ * @returns The connection, or null when no mailbox is connected.
+ */
+export async function getMailConnection(): Promise<StoredMailConnection | null> {
+  return (await load()).mail;
+}
+
+/**
+ * Stores the connected mail account.
+ *
+ * @param connection - Mail connection to persist.
+ * @returns Nothing. Writes the store.
+ */
+export async function saveMailConnection(connection: StoredMailConnection): Promise<void> {
+  const store = await load();
+  store.mail = connection;
+  store.mailPendingStates = [];
+  await persist(store);
+}
+
+/**
+ * Clears the stored mail connection.
+ *
+ * @returns Nothing. Writes the store.
+ */
+export async function clearMailConnection(): Promise<void> {
+  const store = await load();
+  store.mail = null;
+  await persist(store);
+}
+
+/**
+ * Records a pending Gmail OAuth state.
+ *
+ * @param state - Opaque OAuth state value.
+ * @returns Nothing. Writes the store.
+ */
+export async function addMailPendingState(state: string): Promise<void> {
+  const store = await load();
+  prunePendingStates(store);
+  store.mailPendingStates.push({ state, createdAt: new Date().toISOString() });
+  await persist(store);
+}
+
+/**
+ * Consumes a pending Gmail OAuth state.
+ *
+ * @param state - State value returned by Google.
+ * @returns True when the state was issued by this service and is still valid.
+ */
+export async function consumeMailPendingState(state: string): Promise<boolean> {
+  const store = await load();
+  prunePendingStates(store);
+
+  const index = store.mailPendingStates.findIndex((pending) => pending.state === state);
+  if (index === -1) return false;
+
+  //else
+
+  store.mailPendingStates.splice(index, 1);
+  await persist(store);
+  return true;
 }

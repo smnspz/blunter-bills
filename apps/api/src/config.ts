@@ -100,6 +100,12 @@ export const config = {
     accessValidDays: intEnv("ENABLE_BANKING_ACCESS_VALID_DAYS", DEFAULT_ACCESS_VALID_DAYS),
     timeoutMs: intEnv("ENABLE_BANKING_TIMEOUT_MS", DEFAULT_TIMEOUT_MS),
   },
+  mail: {
+    googleClientId: optionalEnv("GOOGLE_CLIENT_ID") ?? "",
+    googleClientSecret: optionalEnv("GOOGLE_CLIENT_SECRET") ?? "",
+    gmailRedirectUrl:
+      optionalEnv("GOOGLE_REDIRECT_URI") ?? `http://localhost:${port}/mail/gmail/callback`,
+  },
 } as const;
 
 /**
@@ -130,6 +136,35 @@ export function assertEnableBankingConfigured(): void {
       503,
       "enable_banking_not_configured",
       `Enable Banking is not configured. Missing: ${missing.join(", ")}`,
+    );
+  }
+}
+
+/**
+ * Lists the configuration variables required for the Gmail setup flow.
+ *
+ * @returns The names of the missing variables, or an empty array when complete.
+ */
+export function missingMailConfig(): string[] {
+  const missing: string[] = [];
+  if (config.mail.googleClientId === "") missing.push("GOOGLE_CLIENT_ID");
+  if (config.mail.googleClientSecret === "") missing.push("GOOGLE_CLIENT_SECRET");
+  return missing;
+}
+
+/**
+ * Ensures Gmail OAuth is configured.
+ *
+ * @returns Nothing. Returns when the configuration is complete.
+ * @throws {HttpError} When one or more required variables are missing.
+ */
+export function assertMailConfigured(): void {
+  const missing = missingMailConfig();
+  if (missing.length > 0) {
+    throw new HttpError(
+      503,
+      "mail_not_configured",
+      `Gmail OAuth is not configured. Missing: ${missing.join(", ")}`,
     );
   }
 }

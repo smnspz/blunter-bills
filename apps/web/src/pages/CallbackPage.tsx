@@ -19,7 +19,7 @@ export function CallbackPage() {
   useEffect(() => {
     if (result !== "success") return;
 
-    const timer = window.setTimeout(() => navigate("/dashboard", { replace: true }), 700);
+    const timer = window.setTimeout(() => navigate("/setup/mail", { replace: true }), 700);
     return () => window.clearTimeout(timer);
   }, [navigate, result]);
 
@@ -33,10 +33,10 @@ export function CallbackPage() {
               <p className="text-[11px] font-bold uppercase tracking-[0.18em]">Bank connected</p>
             </div>
             <h1 className="font-sans text-3xl font-black uppercase leading-none tracking-tighter sm:text-4xl">
-              Taking you to the dashboard.
+              Taking you to mail setup.
             </h1>
             <p className="text-sm leading-relaxed text-ink/70">
-              The session is stored. You can close this tab if the redirect stalls.
+              Bank connected. Next: connect your inbox so Blunter Bills can find new bills.
             </p>
           </div>
         ) : result === "error" ? (

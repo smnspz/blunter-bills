@@ -178,6 +178,9 @@ importers:
       '@blunter-bills/enable-banking':
         specifier: workspace:*
         version: link:../../packages/enable-banking
+      '@blunter-bills/mail':
+        specifier: workspace:*
+        version: link:../../packages/mail
       fastify:
         specifier: ^5.2.1
         version: 5.12.8
@@ -243,6 +246,18 @@ importers:
       jose:
         specifier: ^6.0.11
         version: 6.2.17
+    devDependencies:
+      '@types/node':
+        specifier: ^24.0.0
+        version: 24.19.2
+      tsx:
+        specifier: ^4.19.2
+        version: 4.23.15
+      typescript:
+        specifier: ^5.7.3
+        version: 5.9.3
+
+  packages/mail:
     devDependencies:
       '@types/node':
         specifier: ^24.0.0

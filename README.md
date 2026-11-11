@@ -11,6 +11,7 @@ blunter-bills/
     web/   Vite + React 19 + React Compiler + Tailwind v4 SPA
   packages/
     enable-banking/  standalone typed Enable Banking client (SDK)
+    mail/            provider-agnostic email reading (Gmail adapter)
 ```
 
 The `enable-banking` package owns the Enable Banking JWT and upstream client.
@@ -44,8 +45,10 @@ key.
 3. The browser is redirected to Enable Banking and then to the bank's own SCA.
 4. The bank returns to the API's `ENABLE_BANKING_REDIRECT_URL`; the API
    exchanges the code and stores the session.
-5. With `return_url` set, the API redirects to the web app's `/auth/callback`,
-   which sends you to `/dashboard`.
+5. With `return_url` set, the API redirects to the web app's `/auth/callback`.
+6. The web app sends you to `/setup/mail`, where you pick a provider and connect
+   Gmail.
+7. After the mail callback, you land on `/dashboard`.
 
 The dashboard is intentionally a welcome screen for now. Transactions and
 filters are the next step.
@@ -77,4 +80,5 @@ pnpm format:check
   from that phone. An HTTPS tunnel is the simplest option.
 
 See [`apps/api/README.md`](apps/api/README.md) for the Enable Banking setup and
-API details.
+API details. See [`packages/mail/README.md`](packages/mail/README.md) for the
+Gmail OAuth setup and the mail reader.

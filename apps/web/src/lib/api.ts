@@ -32,6 +32,20 @@ export interface StartAuthResponse {
   state: string;
 }
 
+/** Response from POST /mail/gmail/start. */
+export interface StartMailAuthResponse {
+  url: string;
+  state: string;
+}
+
+/** Mail connection status returned by GET /mail/status. */
+export interface MailStatus {
+  configured: boolean;
+  connected: boolean;
+  provider: string | null;
+  connected_at: string | null;
+}
+
 /** Error thrown when the API returns a non-2xx response. */
 export class ApiError extends Error {
   /**
@@ -151,5 +165,24 @@ export const api = {
         return_url: input.returnUrl,
       }),
     });
+  },
+
+  /**
+   * Fetches the mail connection status.
+   *
+   * @param signal - Optional abort signal.
+   * @returns Configured/connected state and provider.
+   */
+  getMailStatus(signal?: AbortSignal): Promise<MailStatus> {
+    return request<MailStatus>("/mail/status", { signal });
+  },
+
+  /**
+   * Starts the Gmail consent flow.
+   *
+   * @returns The Google consent URL and OAuth state.
+   */
+  startGmailAuth(): Promise<StartMailAuthResponse> {
+    return request<StartMailAuthResponse>("/mail/gmail/start", { method: "POST" });
   },
 };

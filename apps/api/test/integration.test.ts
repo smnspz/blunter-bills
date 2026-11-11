@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { after, describe, it } from "node:test";
 import type { StartAuthorizationRequest, TransactionsQuery } from "@blunter-bills/enable-banking";
 import { FakeEnableBankingClient } from "./fixtures/fake-enable-banking.js";
+import { FakeMailOAuth } from "./fixtures/fake-mail-oauth.js";
 
 // Prepare an isolated data directory
 const dataDir = await mkdtemp(join(tmpdir(), "enable-banking-service-"));
@@ -20,10 +21,14 @@ process.env.ENABLE_BANKING_PRIVATE_KEY = "dummy";
 process.env.ENABLE_BANKING_REDIRECT_URL = "http://localhost/auth/callback";
 process.env.ENABLE_BANKING_ASPSP_NAME = "Mock ASPSP";
 process.env.ENABLE_BANKING_ASPSP_COUNTRY = "FI";
+process.env.GOOGLE_CLIENT_ID = "test-client";
+process.env.GOOGLE_CLIENT_SECRET = "test-secret";
+process.env.GOOGLE_REDIRECT_URI = "http://localhost:3000/mail/gmail/callback";
 
 const { buildApp } = await import("../src/app.js");
 const fake = new FakeEnableBankingClient();
-const app = buildApp({ enableBanking: fake });
+const mail = new FakeMailOAuth();
+const app = buildApp({ enableBanking: fake, mailOAuth: mail });
 
 after(async () => {
   await app.close();
@@ -70,6 +75,7 @@ function isoDay(offset: number): string {
 
 describe("Blunter Bills API", () => {
   let pendingState = "";
+  let mailState = "";
 
   it("serves health without the service key", async () => {
     const response = await call({ method: "GET", url: "/health", authenticated: false });
@@ -336,5 +342,68 @@ describe("Blunter Bills API", () => {
 
     assert.equal(callback.statusCode, 302);
     assert.equal(callback.headers.location, "http://localhost:5173/auth/callback?auth=success");
+  });
+
+  it("reports mail as configured but disconnected", async () => {
+    const response = await call({ method: "GET", url: "/mail/status" });
+    assert.equal(response.statusCode, 200);
+    assert.deepEqual(response.json(), {
+      configured: true,
+      connected: false,
+      provider: null,
+      connected_at: null,
+    });
+  });
+
+  it("starts the Gmail consent flow", async () => {
+    const response = await call({ method: "POST", url: "/mail/gmail/start" });
+    assert.equal(response.statusCode, 200);
+
+    const body = response.json<{ url: string; state: string }>();
+    assert.match(body.url, /\?state=/);
+    assert.ok(mail.calls.includes(`url:${body.state}`));
+    mailState = body.state;
+  });
+
+  it("completes the mail callback and stores the connection", async () => {
+    const callback = await call({
+      method: "GET",
+      url: `/mail/gmail/callback?code=good-code&state=${mailState}`,
+      authenticated: false,
+    });
+    assert.equal(callback.statusCode, 302);
+    assert.equal(callback.headers.location, "http://localhost:5173/setup/mail?mail=success");
+
+    const status = await call({ method: "GET", url: "/mail/status" });
+    const body = status.json<{ connected: boolean; provider: string }>();
+    assert.equal(body.connected, true);
+    assert.equal(body.provider, "gmail");
+  });
+
+  it("disconnects the mail account", async () => {
+    const response = await call({ method: "DELETE", url: "/mail" });
+    assert.equal(response.statusCode, 200);
+
+    const status = await call({ method: "GET", url: "/mail/status" });
+    assert.equal(status.json<{ connected: boolean }>().connected, false);
+  });
+
+  it("redirects mail failures to the setup page", async () => {
+    const start = await call({ method: "POST", url: "/mail/gmail/start" });
+    const { state } = start.json<{ state: string }>();
+
+    const callback = await call({
+      method: "GET",
+      url: `/mail/gmail/callback?code=bad-code&state=${state}`,
+      authenticated: false,
+    });
+    assert.equal(callback.statusCode, 302);
+    assert.equal(
+      callback.headers.location,
+      "http://localhost:5173/setup/mail?mail=error&message=AUTH_FAILED",
+    );
+
+    const status = await call({ method: "GET", url: "/mail/status" });
+    assert.equal(status.json<{ connected: boolean }>().connected, false);
   });
 });

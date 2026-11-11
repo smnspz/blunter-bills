@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@blunter-bills/enable-banking": "workspace:*",
+    "@blunter-bills/mail": "workspace:*",
     "fastify": "^5.2.1"
   },
   "devDependencies": {

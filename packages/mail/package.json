@@ -1,0 +1,31 @@
+{
+  "name": "@blunter-bills/mail",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Provider-agnostic email reading with a Gmail adapter",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "development": "./src/index.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.test.json",
+    "test": "node --import tsx --test \"test/**/*.test.ts\"",
+    "authorize:gmail": "tsx scripts/authorize-gmail.ts",
+    "read:latest": "tsx scripts/read-latest.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3"
+  }
+}

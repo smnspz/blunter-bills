@@ -65,23 +65,26 @@ The server starts even without credentials (so you can check `/health`), but
 
 ### Configuration reference
 
-| Variable                           | Required | Default                               | Description                                                                                       |
-| ---------------------------------- | -------- | ------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| `ENABLE_BANKING_APP_ID`            | yes      | –                                     | Application ID from the control panel                                                             |
-| `ENABLE_BANKING_PRIVATE_KEY`       | one of   | –                                     | Inline PEM key (use `\n` for newlines)                                                            |
-| `ENABLE_BANKING_PRIVATE_KEY_PATH`  | one of   | –                                     | Path to the PEM private key                                                                       |
-| `ENABLE_BANKING_REDIRECT_URL`      | yes      | `http://localhost:3000/auth/callback` | Must match the registered redirect URL                                                            |
-| `ENABLE_BANKING_BASE_URL`          | no       | `https://api.enablebanking.com`       | API base URL                                                                                      |
-| `ENABLE_BANKING_JWT_AUDIENCE`      | no       | `api.enablebanking.com`               | JWT `aud` claim                                                                                   |
-| `ENABLE_BANKING_ASPSP_NAME`        | no       | –                                     | Default bank name for `POST /auth`                                                                |
-| `ENABLE_BANKING_ASPSP_COUNTRY`     | no       | –                                     | Default bank country for `POST /auth`                                                             |
-| `ENABLE_BANKING_ACCESS_VALID_DAYS` | no       | `90`                                  | Requested consent lifetime                                                                        |
-| `ENABLE_BANKING_TIMEOUT_MS`        | no       | `30000`                               | Upstream request timeout                                                                          |
-| `PORT` / `HOST`                    | no       | `3000` / `0.0.0.0`                    | HTTP listener                                                                                     |
-| `LOG_LEVEL`                        | no       | `info`                                | Fastify/pino log level                                                                            |
-| `SERVICE_API_KEY`                  | no       | –                                     | If set, require `Authorization: Bearer <key>` on all routes except `/health` and `/auth/callback` |
-| `DATA_DIR`                         | no       | `.data`                               | Where the session is persisted                                                                    |
-| `FRONTEND_URL`                     | no       | `http://localhost:5173`               | Allowed origin for `POST /auth` `return_url` redirects                                            |
+| Variable                           | Required | Default                                     | Description                                                                                                     |
+| ---------------------------------- | -------- | ------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `ENABLE_BANKING_APP_ID`            | yes      | –                                           | Application ID from the control panel                                                                           |
+| `ENABLE_BANKING_PRIVATE_KEY`       | one of   | –                                           | Inline PEM key (use `\n` for newlines)                                                                          |
+| `ENABLE_BANKING_PRIVATE_KEY_PATH`  | one of   | –                                           | Path to the PEM private key                                                                                     |
+| `ENABLE_BANKING_REDIRECT_URL`      | yes      | `http://localhost:3000/auth/callback`       | Must match the registered redirect URL                                                                          |
+| `ENABLE_BANKING_BASE_URL`          | no       | `https://api.enablebanking.com`             | API base URL                                                                                                    |
+| `ENABLE_BANKING_JWT_AUDIENCE`      | no       | `api.enablebanking.com`                     | JWT `aud` claim                                                                                                 |
+| `ENABLE_BANKING_ASPSP_NAME`        | no       | –                                           | Default bank name for `POST /auth`                                                                              |
+| `ENABLE_BANKING_ASPSP_COUNTRY`     | no       | –                                           | Default bank country for `POST /auth`                                                                           |
+| `ENABLE_BANKING_ACCESS_VALID_DAYS` | no       | `90`                                        | Requested consent lifetime                                                                                      |
+| `ENABLE_BANKING_TIMEOUT_MS`        | no       | `30000`                                     | Upstream request timeout                                                                                        |
+| `PORT` / `HOST`                    | no       | `3000` / `0.0.0.0`                          | HTTP listener                                                                                                   |
+| `LOG_LEVEL`                        | no       | `info`                                      | Fastify/pino log level                                                                                          |
+| `SERVICE_API_KEY`                  | no       | –                                           | If set, require `Authorization: Bearer <key>` except on `/health`, `/auth/callback`, and `/mail/gmail/callback` |
+| `DATA_DIR`                         | no       | `.data`                                     | Where the session is persisted                                                                                  |
+| `FRONTEND_URL`                     | no       | `http://localhost:5173`                     | Allowed origin for `POST /auth` `return_url` redirects                                                          |
+| `GOOGLE_CLIENT_ID`                 | no       | –                                           | Gmail OAuth client id for the web setup flow                                                                    |
+| `GOOGLE_CLIENT_SECRET`             | no       | –                                           | Gmail OAuth client secret                                                                                       |
+| `GOOGLE_REDIRECT_URI`              | no       | `http://localhost:3000/mail/gmail/callback` | Web Gmail OAuth redirect; must be registered on the Google client                                               |
 
 **Sandbox vs production:** both use `https://api.enablebanking.com`. The
 environment is determined by the application you registered, not by the URL.
@@ -222,16 +225,20 @@ curl "http://localhost:3000/transactions?days=5&raw=true"
 
 ## API summary
 
-| Method   | Path                 | Purpose                                           |
-| -------- | -------------------- | ------------------------------------------------- |
-| `GET`    | `/health`            | Liveness plus configuration/session status        |
-| `GET`    | `/aspsps?country=FI` | Banks available to the application                |
-| `POST`   | `/auth`              | Start bank authorization, returns redirect URL    |
-| `GET`    | `/auth/callback`     | OAuth redirect target; exchanges code for session |
-| `GET`    | `/session`           | Show the stored session                           |
-| `DELETE` | `/session`           | Revoke the session upstream and locally           |
-| `GET`    | `/accounts`          | Accounts exposed by the session                   |
-| `GET`    | `/transactions`      | Date-filtered transaction list                    |
+| Method   | Path                   | Purpose                                           |
+| -------- | ---------------------- | ------------------------------------------------- |
+| `GET`    | `/health`              | Liveness plus configuration/session status        |
+| `GET`    | `/aspsps?country=FI`   | Banks available to the application                |
+| `POST`   | `/auth`                | Start bank authorization, returns redirect URL    |
+| `GET`    | `/auth/callback`       | OAuth redirect target; exchanges code for session |
+| `GET`    | `/session`             | Show the stored session                           |
+| `DELETE` | `/session`             | Revoke the session upstream and locally           |
+| `GET`    | `/accounts`            | Accounts exposed by the session                   |
+| `GET`    | `/transactions`        | Date-filtered transaction list                    |
+| `GET`    | `/mail/status`         | Gmail configured/connected status                 |
+| `POST`   | `/mail/gmail/start`    | Start Gmail consent, returns the Google URL       |
+| `GET`    | `/mail/gmail/callback` | Gmail OAuth redirect; stores the refresh token    |
+| `DELETE` | `/mail`                | Disconnect the stored mailbox                     |
 
 ## How it works
 
@@ -247,6 +254,8 @@ curl "http://localhost:3000/transactions?days=5&raw=true"
 - `GET /transactions` uses the stored session, follows `continuation_key`
   pagination (up to 20 pages), and filters locally by date as well — some
   sandbox banks ignore the upstream date filter.
+- `/mail/*` uses `@blunter-bills/mail` for the Gmail consent flow. The refresh
+  token is stored in the same `0600` store as the bank session.
 - The session is stored in `${DATA_DIR}/store.json` with mode `0600`.
 
 This is a single-user service: one stored session at a time. Re-running

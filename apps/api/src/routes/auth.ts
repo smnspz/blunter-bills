@@ -10,7 +10,9 @@ import {
 import type { FastifyInstance } from "fastify";
 import { config } from "../config.js";
 import { HttpError } from "../lib/errors.js";
+import { oauthCallbackQuerySchema } from "../lib/oauth.js";
 import { AUTH_CALLBACK_PATH } from "../lib/paths.js";
+import { withQueryParams } from "../lib/url.js";
 import {
   addPendingState,
   clearSession,
@@ -68,17 +70,6 @@ const startAuthBodySchema = {
     valid_until: { type: "string", minLength: 10 },
     state: { type: "string", minLength: 1 },
     return_url: { type: "string", minLength: 1 },
-  },
-} as const;
-
-const callbackQuerySchema = {
-  type: "object",
-  additionalProperties: true,
-  properties: {
-    code: { type: "string" },
-    state: { type: "string" },
-    error: { type: "string" },
-    error_description: { type: "string" },
   },
 } as const;
 
@@ -181,10 +172,7 @@ function resolveReturnUrl(requested: string | undefined): string | null {
  * @returns The frontend URL with result query parameters.
  */
 function withAuthResult(returnUrl: string, status: "success" | "error", message?: string): string {
-  const url = new URL(returnUrl);
-  url.searchParams.set("auth", status);
-  if (message !== undefined) url.searchParams.set("message", message);
-  return url.toString();
+  return withQueryParams(returnUrl, { auth: status, message });
 }
 
 /**
@@ -305,7 +293,7 @@ export async function authRoutes(app: FastifyInstance, options: AuthRoutesOption
    */
   app.get<{ Querystring: CallbackQuery }>(
     AUTH_CALLBACK_PATH,
-    { schema: { querystring: callbackQuerySchema } },
+    { schema: { querystring: oauthCallbackQuerySchema } },
     async (request, reply) => {
       const { code, state, error, error_description: errorDescription } = request.query;
 
